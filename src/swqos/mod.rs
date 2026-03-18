@@ -224,8 +224,8 @@ pub enum SwqosConfig {
     Node1(String, SwqosRegion, Option<String>, Option<SwqosTransport>),
     /// FlashBlock(api_token, region, custom_url)
     FlashBlock(String, SwqosRegion, Option<String>),
-    /// BlockRazor(api_token, region, custom_url)
-    BlockRazor(String, SwqosRegion, Option<String>),
+    /// BlockRazor(api_token, region, custom_url, transport). transport=None => gRPC; Some(Http) => HTTP.
+    BlockRazor(String, SwqosRegion, Option<String>, Option<SwqosTransport>),
     /// Astralane(api_token, region, custom_url, transport). transport=None 表示 Http。
     Astralane(String, SwqosRegion, Option<String>, Option<SwqosTransport>),
     /// Stellium(api_token, region, custom_url)
@@ -255,7 +255,7 @@ impl SwqosConfig {
             SwqosConfig::ZeroSlot(_, _, _) => SwqosType::ZeroSlot,
             SwqosConfig::Node1(_, _, _, _) => SwqosType::Node1,
             SwqosConfig::FlashBlock(_, _, _) => SwqosType::FlashBlock,
-            SwqosConfig::BlockRazor(_, _, _) => SwqosType::BlockRazor,
+            SwqosConfig::BlockRazor(_, _, _, _) => SwqosType::BlockRazor,
             SwqosConfig::Astralane(_, _, _, _) => SwqosType::Astralane,
             SwqosConfig::Stellium(_, _, _) => SwqosType::Stellium,
             SwqosConfig::Lightspeed(_, _, _) => SwqosType::Lightspeed,
@@ -351,11 +351,20 @@ impl SwqosConfig {
                     FlashBlockClient::new(rpc_url.clone(), endpoint.to_string(), auth_token);
                 Ok(Arc::new(flashblock_client))
             }
-            SwqosConfig::BlockRazor(auth_token, region, url) => {
-                let endpoint = SwqosConfig::get_endpoint(SwqosType::BlockRazor, region, url);
-                let blockrazor_client =
-                    BlockRazorClient::new(rpc_url.clone(), endpoint.to_string(), auth_token);
-                Ok(Arc::new(blockrazor_client))
+            SwqosConfig::BlockRazor(auth_token, region, url, transport) => {
+                let use_http = transport.map_or(false, |t| t == SwqosTransport::Http);
+                if use_http {
+                    let endpoint = SwqosConfig::get_endpoint(SwqosType::BlockRazor, region, url);
+                    let blockrazor_client =
+                        BlockRazorClient::new_http(rpc_url.clone(), endpoint.to_string(), auth_token);
+                    Ok(Arc::new(blockrazor_client))
+                } else {
+                    // Default to gRPC
+                    let endpoint = SwqosConfig::get_endpoint(SwqosType::BlockRazor, region, url);
+                    let blockrazor_client =
+                        BlockRazorClient::new_grpc(rpc_url.clone(), endpoint.to_string(), auth_token).await?;
+                    Ok(Arc::new(blockrazor_client))
+                }
             }
             SwqosConfig::Astralane(auth_token, region, url, transport) => {
                 let use_quic = transport.map_or(false, |t| t == SwqosTransport::Quic);
