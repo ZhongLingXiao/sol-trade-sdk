@@ -111,6 +111,7 @@ pub const BLOCKRAZOR_TIP_ACCOUNTS: &[Pubkey] = &[
     pubkey!("AP6qExwrbRgBAVaehg4b5xHENX815sMabtBzUzVB4v8S"),
 ];
 
+/// Astralane tip wallets. Extended with new addresses for improved routing and reduced write-lock contention (see portal.astralane.io/blockline).
 pub const ASTRALANE_TIP_ACCOUNTS: &[Pubkey] = &[
     pubkey!("astrazznxsGUhWShqgNtAdfrzP2G83DzcWVJDxwV9bF"),
     pubkey!("astra4uejePWneqNaJKuFFA8oonqCE1sqF6b45kDMZm"),
@@ -120,6 +121,16 @@ pub const ASTRALANE_TIP_ACCOUNTS: &[Pubkey] = &[
     pubkey!("astraubkDw81n4LuutzSQ8uzHCv4BhPVhfvTcYv8SKC"),
     pubkey!("astraZW5GLFefxNPAatceHhYjfA1ciq9gvfEg2S47xk"),
     pubkey!("astrawVNP4xDBKT7rAdxrLYiTSTdqtUr63fSMduivXK"),
+    // New tip wallets (2025) for improved performance and reduced write-lock delays
+    pubkey!("AstrA1ejL4UeXC2SBP4cpeEmtcFPZVLxx3XGKXyCW6to"),
+    pubkey!("AsTra79FET4aCKWspPqeSFvjJNyp96SvAnrmyAxqg5b7"),
+    pubkey!("AstrABAu8CBTyuPXpV4eSCJ5fePEPnxN8NqBaPKQ9fHR"),
+    pubkey!("AsTRADtvb6tTmrsqULQ9Wji9PigDMjhfEMza6zkynEvV"),
+    pubkey!("AsTRAEoyMofR3vUPpf9k68Gsfb6ymTZttEtsAbv8Bk4d"),
+    pubkey!("AStrAJv2RN2hKCHxwUMtqmSxgdcNZbihCwc1mCSnG83W"),
+    pubkey!("Astran35aiQUF57XZsmkWMtNCtXGLzs8upfiqXxth2bz"),
+    pubkey!("AStRAnpi6kFrKypragExgeRoJ1QnKH7pbSjLAKQVWUum"),
+    pubkey!("ASTRaoF93eYt73TYvwtsv6fMWHWbGmMUZfVZPo3CRU9C"),
 ];
 
 pub const STELLIUM_TIP_ACCOUNTS: &[Pubkey] = &[
