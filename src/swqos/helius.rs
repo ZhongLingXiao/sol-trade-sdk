@@ -17,7 +17,9 @@ use serde_json::json;
 use solana_sdk::transaction::VersionedTransaction;
 use solana_transaction_status::UiTransactionEncoding;
 use std::sync::Arc;
-use std::time::Instant;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::{Duration, Instant};
+use tokio::task::JoinHandle;
 
 use crate::common::SolanaRpcClient;
 use crate::constants::swqos::{
@@ -29,10 +31,16 @@ use crate::swqos::{SwqosClientTrait, SwqosType, TradeType};
 pub struct HeliusClient {
     /// Cached full URL with query params (auth/swqos_only) to avoid per-request allocation.
     pub submit_url: String,
+    /// Base endpoint (without /fast path) for ping requests.
+    ping_url: String,
     pub rpc_client: Arc<SolanaRpcClient>,
     pub http_client: Client,
     /// When true, min_tip_sol() returns 0.000005; else 0.0002.
     swqos_only: bool,
+    /// Handle to the background ping task.
+    ping_handle: Arc<tokio::sync::Mutex<Option<JoinHandle<()>>>>,
+    /// Flag to stop the ping task.
+    stop_ping: Arc<AtomicBool>,
 }
 
 impl HeliusClient {
@@ -45,7 +53,37 @@ impl HeliusClient {
         let rpc_client = SolanaRpcClient::new(rpc_url);
         let http_client = default_http_client_builder().build().unwrap();
         let submit_url = Self::build_submit_url(&endpoint, api_key.as_deref(), swqos_only);
-        Self { submit_url, rpc_client: Arc::new(rpc_client), http_client, swqos_only }
+        let ping_url = Self::build_ping_url(&endpoint);
+        let ping_handle = Arc::new(tokio::sync::Mutex::new(None));
+        let stop_ping = Arc::new(AtomicBool::new(false));
+
+        let client = Self {
+            submit_url,
+            ping_url,
+            rpc_client: Arc::new(rpc_client),
+            http_client,
+            swqos_only,
+            ping_handle,
+            stop_ping,
+        };
+
+        let client_clone = client.clone();
+        tokio::spawn(async move {
+            client_clone.start_ping_task().await;
+        });
+
+        client
+    }
+
+    /// Build ping URL: replace /fast suffix with /ping.
+    /// e.g. "http://slc-sender.helius-rpc.com/fast" -> "http://slc-sender.helius-rpc.com/ping"
+    #[inline]
+    fn build_ping_url(endpoint: &str) -> String {
+        if let Some(base) = endpoint.strip_suffix("/fast") {
+            format!("{}/ping", base)
+        } else {
+            format!("{}/ping", endpoint.trim_end_matches('/'))
+        }
     }
 
     /// Build URL once at construction; no per-request allocation.
@@ -66,6 +104,59 @@ impl HeliusClient {
             url.push_str("swqos_only=true");
         }
         url
+    }
+
+    /// Start a background task that sends periodic GET /ping requests to keep connection warm.
+    /// Helius recommends pinging every 30s to reduce cold-start latency.
+    async fn start_ping_task(&self) {
+        let ping_url = self.ping_url.clone();
+        let http_client = self.http_client.clone();
+        let ping_handle = self.ping_handle.clone();
+        let stop_ping = self.stop_ping.clone();
+
+        let handle = tokio::spawn(async move {
+            // Send an initial ping immediately to warm the connection
+            if let Err(e) = Self::send_ping_request(&http_client, &ping_url).await {
+                if crate::common::sdk_log::sdk_log_enabled() {
+                    eprintln!("Helius ping request failed: {}", e);
+                }
+            }
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                if stop_ping.load(Ordering::Relaxed) {
+                    break;
+                }
+                if let Err(e) = Self::send_ping_request(&http_client, &ping_url).await {
+                    if crate::common::sdk_log::sdk_log_enabled() {
+                        eprintln!("Helius ping request failed: {}", e);
+                    }
+                }
+            }
+        });
+
+        let mut guard = ping_handle.lock().await;
+        if let Some(old) = guard.as_ref() {
+            old.abort();
+        }
+        *guard = Some(handle);
+    }
+
+    /// Send a GET request to the Helius /ping endpoint to warm the connection.
+    async fn send_ping_request(http_client: &Client, ping_url: &str) -> Result<()> {
+        let response = http_client
+            .get(ping_url)
+            .timeout(Duration::from_millis(2000))
+            .send()
+            .await?;
+        let status = response.status();
+        let _ = response.bytes().await;
+        if !status.is_success() {
+            if crate::common::sdk_log::sdk_log_enabled() {
+                eprintln!("Helius ping returned non-success status: {}", status);
+            }
+        }
+        Ok(())
     }
 
     pub async fn send_transaction(
@@ -155,6 +246,20 @@ impl HeliusClient {
             println!(" [{:width$}] {} confirmed: {:?}", "helius", trade_type, start_time.elapsed(), width = crate::common::sdk_log::SWQOS_LABEL_WIDTH);
         }
         Ok(())
+    }
+}
+
+impl Drop for HeliusClient {
+    fn drop(&mut self) {
+        self.stop_ping.store(true, Ordering::Relaxed);
+        let ping_handle = self.ping_handle.clone();
+        tokio::spawn(async move {
+            let mut guard = ping_handle.lock().await;
+            if let Some(handle) = guard.as_ref() {
+                handle.abort();
+            }
+            *guard = None;
+        });
     }
 }
 
