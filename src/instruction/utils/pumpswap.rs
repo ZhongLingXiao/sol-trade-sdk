@@ -307,8 +307,8 @@ pub async fn find_by_base_mint(
 ) -> Result<(Pubkey, Pool), anyhow::Error> {
     // Use getProgramAccounts to find pools for the given mint.
     // base_mint 在账户布局中的偏移：8(discriminator) + 1(bump) + 2(index) + 32(creator) = 43
+    // No DataSize filter: Token2022 pools are 643 bytes vs 252 for SPL Token pools
     let filters = vec![
-        solana_rpc_client_api::filter::RpcFilterType::DataSize(POOL_ACCOUNT_DATA_LEN),
         solana_rpc_client_api::filter::RpcFilterType::Memcmp(
             solana_client::rpc_filter::Memcmp::new_base58_encoded(43, base_mint.as_ref()),
         ),
@@ -363,8 +363,8 @@ pub async fn find_by_quote_mint(
 ) -> Result<(Pubkey, Pool), anyhow::Error> {
     // Use getProgramAccounts to find pools for the given mint.
     // quote_mint 在账户布局中的偏移：8 + 1 + 2 + 32 + 32 = 75
+    // No DataSize filter: Token2022 pools are 643 bytes vs 252 for SPL Token pools
     let filters = vec![
-        solana_rpc_client_api::filter::RpcFilterType::DataSize(POOL_ACCOUNT_DATA_LEN),
         solana_rpc_client_api::filter::RpcFilterType::Memcmp(
             solana_client::rpc_filter::Memcmp::new_base58_encoded(75, quote_mint.as_ref()),
         ),
@@ -454,10 +454,12 @@ pub async fn find_by_mint(
         Err(e) => diag.push(format!("getProgramAccounts(quote_mint): {}", e)),
     }
 
+    let diag_str = diag.join("; ");
+    eprintln!("[find_by_mint] {} failed: {}", mint, diag_str);
     Err(anyhow!(
-        "No pool found for mint {}. 诊断: {}。若使用自建 RPC 请确认已开启 getProgramAccounts 或换用公共 RPC 重试；若代币未在 PumpSwap 建池请先在 pump.fun/DEX 上确认",
+        "No pool found for mint {}. diag: {}",
         mint,
-        diag.join("; ")
+        diag_str
     ))
 }
 
