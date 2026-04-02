@@ -276,6 +276,9 @@ async fn simulate_transaction(
     let unit_limit = default_config.2.cu_limit;
     let unit_price = default_config.2.cu_price;
 
+    // Log instruction list for debugging (before build_transaction wraps them)
+    let business_instruction_count = instructions.len();
+
     let transaction = build_transaction(
         &payer,
         Some(&rpc),
@@ -320,16 +323,56 @@ async fn simulate_transaction(
         .clone();
 
     if let Some(err) = simulate_result.value.err {
-        #[cfg(feature = "perf-trace")]
-        {
-            warn!(target: "sol_trade_sdk", "[Simulation Failed] error={:?} signature={:?}", err, signature);
-            if let Some(logs) = &simulate_result.value.logs {
-                trace!(target: "sol_trade_sdk", "Transaction logs: {:?}", logs);
-            }
-            if let Some(units_consumed) = simulate_result.value.units_consumed {
-                trace!(target: "sol_trade_sdk", "Compute Units Consumed: {}", units_consumed);
+        // Always print debug info on simulation failure (not gated by perf-trace)
+        warn!(
+            "[Simulate FAILED] error={:?} cu_price={} cu_limit={} with_tip={} tip={} business_ixs={}",
+            err, unit_price, unit_limit, with_tip, tip, business_instruction_count
+        );
+
+        // Print the full instruction list with index and program_id
+        // Reconstruct the instruction order: nonce? → tip? → compute_budget → business
+        let has_nonce = durable_nonce.is_some();
+        let cb_count = (if unit_price > 0 { 1 } else { 0 }) + (if unit_limit > 0 { 1 } else { 0 });
+        warn!(
+            "[Simulate DEBUG] Instruction layout: nonce={} tip=false cb_count={} business_ixs={}",
+            has_nonce, cb_count, business_instruction_count
+        );
+        for (i, ix) in instructions.iter().enumerate() {
+            let pid = ix.program_id.to_string();
+            let label = if pid.starts_with("11111111") {
+                "System Program"
+            } else if pid.starts_with("ComputeB") {
+                "Compute Budget"
+            } else if pid.starts_with("TokenkegQ") {
+                "SPL Token"
+            } else if pid.starts_with("TokenzQd") {
+                "Token-2022"
+            } else if pid.starts_with("6EF8rrec") {
+                "PumpFun"
+            } else if pid.starts_with("ATokenGP") {
+                "Associated Token"
+            } else {
+                ""
+            };
+            warn!(
+                "[Simulate DEBUG]   business_ix[{}] program={} {}",
+                i,
+                &pid[..std::cmp::min(12, pid.len())],
+                label
+            );
+        }
+
+        // Print simulation logs from RPC
+        if let Some(logs) = &simulate_result.value.logs {
+            warn!("[Simulate DEBUG] --- Simulation Logs ({} lines) ---", logs.len());
+            for (i, log) in logs.iter().enumerate() {
+                warn!("[Simulate LOG {:>3}] {}", i, log);
             }
         }
+        if let Some(units_consumed) = simulate_result.value.units_consumed {
+            warn!("[Simulate DEBUG] Compute Units Consumed: {}", units_consumed);
+        }
+
         return Ok((false, vec![signature], Some(anyhow::anyhow!("{:?}", err))));
     }
 
