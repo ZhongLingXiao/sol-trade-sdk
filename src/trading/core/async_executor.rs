@@ -562,7 +562,7 @@ pub async fn execute_parallel(
     // All jobs enqueued (no spawn on hot path)
 
     if !wait_transaction_confirmed {
-        const SUBMIT_TIMEOUT_SECS: u64 = 30;
+        const SUBMIT_TIMEOUT_SECS: u64 = 2;//无需确认的交易，一般2秒合适了 一般2秒内发送全都返回 没返回的也不等了，没返回的就是太慢的swqos 
         let ret = collector.wait_for_all_submitted(SUBMIT_TIMEOUT_SECS).await.unwrap_or((
             false,
             vec![],
